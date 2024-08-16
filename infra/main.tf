@@ -2,63 +2,97 @@
 terraform {
   required_providers {
     google = {
-      source = "hashicorp/google"
+      source  = "hashicorp/google"
       version = "4.51.0"
     }
   }
 }
 
 provider "google" {
-  project = "silicon-amulet-432102-s9"
+  project = var.project_id
+  region  = var.region
+
 }
 
+resource "random_id" "job_id" {
+  byte_length = 8  # Longitud del ID en bytes (8 bytes generarán un ID hexadecimal de 16 caracteres)
+}
+# Google Cloud Storage Bucket
 resource "google_storage_bucket" "bucket" {
-  name     = "raw-csv"
-  location = "US"
-}
+  name     = "${var.project_id}-sandbox-bucket"
+  location = var.region
 
+  lifecycle_rule {
+    action {
+      type = "Delete"
+    }
 
-resource "google_sql_database_instance" "mysql_instance" {
-  name             = "mysql-sandbox-instance"
-  database_version = "MYSQL_8_0"                   
-  region           = var.region                    
-
-  settings {
-    tier           = "db-f1-micro"                 
-    backup_configuration {
-      enabled = true                               
+    condition {
+      age = 365
     }
   }
-
-  deletion_protection = false                       
-}
-
-resource "google_service_account" "db_service_account" {
-  account_id   = "db-service-account"
-  display_name = "Service Account for MySQL, GCS, and Cloud Run"
 }
 
 
-resource "google_sql_user" "service_account_user" {
-  name     = google_service_account.db_service_account.email
-  instance = google_sql_database_instance.mysql_instance.name
-  host     = "%"
-  password = ""
-  }
+# BigQuery Dataset
+resource "google_bigquery_dataset" "dataset" {
+  dataset_id                 = var.dataset_id
+  location                   = var.region
+  delete_contents_on_destroy = true
+  project                    = var.project_id
+}
 
-resource "google_project_iam_member" "cloudsql_access" {
+
+# Service Account
+resource "google_service_account" "service_account" {
+  account_id   = var.service_account_id
+  display_name = "BigQuery and GCS Service Account"
+  project      = var.project_id
+}
+
+
+
+# Grant roles to Service Account
+resource "google_project_iam_binding" "sa_storage_access" {
+  role    = "roles/storage.objectAdmin"
+  members = ["serviceAccount:${google_service_account.service_account.email}"]
   project = var.project_id
-  role    = "roles/cloudsql.client"
-  member  = "serviceAccount:${google_service_account.db_service_account.email}"
 }
 
-resource "google_storage_bucket_iam_member" "bucket_access" {
-  bucket = google_storage_bucket.bucket.name
-  role   = "roles/storage.objectAdmin"
-  member = "serviceAccount:${google_service_account.db_service_account.email}"
+resource "google_project_iam_binding" "sa_bigquery_access" {
+  role    = "roles/bigquery.dataEditor"
+  members = ["serviceAccount:${google_service_account.service_account.email}"]
+  project = var.project_id
 }
 
-output "service_account_email" {
-  description = "Service account email"
-  value       = google_service_account.db_service_account.email
+
+# BigQuery tables
+resource "google_bigquery_table" "hired_employees" {
+  dataset_id = google_bigquery_dataset.dataset.dataset_id
+  table_id   = "hired_employees"
+  schema = jsonencode([
+    { "name" : "id", "type" : "INTEGER", "mode" : "REQUIRED" },
+    { "name" : "name", "type" : "STRING", "mode" : "REQUIRED" },
+    { "name" : "datetime", "type" : "STRING", "mode" : "REQUIRED" },
+    { "name" : "department_id", "type" : "INTEGER", "mode" : "REQUIRED" },
+    { "name" : "job_id", "type" : "INTEGER", "mode" : "REQUIRED" }
+  ])
+}
+
+resource "google_bigquery_table" "departments" {
+  dataset_id = google_bigquery_dataset.dataset.dataset_id
+  table_id   = "departments"
+  schema = jsonencode([
+    { "name" : "id", "type" : "INTEGER", "mode" : "REQUIRED" },
+    { "name" : "department", "type" : "STRING", "mode" : "REQUIRED" }
+  ])
+}
+
+resource "google_bigquery_table" "jobs" {
+  dataset_id = google_bigquery_dataset.dataset.dataset_id
+  table_id   = "jobs"
+  schema = jsonencode([
+    { "name" : "id", "type" : "INTEGER", "mode" : "REQUIRED" },
+    { "name" : "job", "type" : "STRING", "mode" : "REQUIRED" }
+  ])
 }

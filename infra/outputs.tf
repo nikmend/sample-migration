@@ -3,7 +3,11 @@ output "bucket_name" {
   value       = google_storage_bucket.bucket.name
 }
 
-output "mysql_instance_connection_name" {
-  description = "Connection name for MySQL instance"
-  value       = google_sql_database_instance.mysql_instance.connection_name
+output "dataset_id" {
+  value = google_bigquery_dataset.dataset.dataset_id
+}
+
+
+output "service_account_email" {
+  value = google_service_account.service_account.email
 }
